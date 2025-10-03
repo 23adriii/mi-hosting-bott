@@ -94,7 +94,7 @@ async def verificacion(ctx):
         description="Para acceder al servidor, necesitas verificarte haciendo clic en el botón de abajo.",
         color=0x2f3136
     )
-    embed.set_footer(text="© KRNL")
+    embed.set_footer(text="© JB INFO")
 
     # Envía el mensaje con el embed y la vista (que contiene el botón).
     await ctx.send(embed=embed, view=VerificationView())
