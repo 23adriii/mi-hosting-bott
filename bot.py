@@ -17,13 +17,11 @@ def home():
 
 def run_server():
     # Ejecuta el servidor en el puerto que asigne el hosting.
-    # Usamos try-except para manejar si el puerto ya está definido por el hosting.
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     # Inicia el servidor web en un hilo (proceso) separado.
-    # Esto es para que no bloquee al bot de Discord.
     server_thread = Thread(target=run_server)
     server_thread.start()
 
@@ -241,7 +239,9 @@ if __name__ == "__main__":
     
     # 2. Obtiene el token de forma segura desde las variables de entorno
     try:
+        # LA LÍNEA CORRECTA: Busca la variable llamada "DISCORD_TOKEN"
         token = os.environ.get("DISCORD_TOKEN")
+        
         if token is None:
             print("❌ ERROR: El token no está configurado.")
             print("Asegúrate de crear la variable 'DISCORD_TOKEN' en tu hosting.")
