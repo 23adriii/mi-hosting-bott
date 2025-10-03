@@ -12,39 +12,39 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    # Esta es la "puerta" que UptimeRobot visitará.
     return "¡El bot está vivo!"
 
 def run_server():
-    # Ejecuta el servidor en el puerto que asigne el hosting.
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
-    # Inicia el servidor web en un hilo (proceso) separado.
     server_thread = Thread(target=run_server)
     server_thread.start()
 
-# --- TU CÓDIGO DEL BOT (SIN CAMBIOS) ---
+# --- CONFIGURACIÓN DEL BOT ---
+
+# ¡¡MUY IMPORTANTE!! Pon aquí el ID del rol que quieres que se asigne a los usuarios verificados.
+VERIFIED_ROLE_ID = 1423271361253740574 # <-- ¡CAMBIA ESTE ID!
 
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.message_content = True
+intents.members = True # <-- Necesario para asignar roles
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ---------- Categorías de tickets ----------
+# ---------- IDs del Sistema de Tickets ----------
 CATEGORIES = {
-    "postulación": 1423673954018656346,  # ID de categoría Postulación
-    "jefatura": 1423681296961507512,    # ID de categoría Jefatura
-    "seguridad": 1423674061053104230,     # ID de categoría Seguridad
-    "soporte": 1423674186005614733       # ID de categoría Soporte
+    "postulación": 1423673954018656346,
+    "jefatura": 1423681296961507512,
+    "seguridad": 1423674061053104230,
+    "soporte": 1423674186005614733
 }
+LOG_CHANNEL_ID = 1423271363136848005
 
-LOG_CHANNEL_ID = 1423271363136848005  # ID del canal de logs
-
-# ---------- Plantilla ----------
+# ---------- Plantilla de Postulación ----------
 POSTULACION_TEMPLATE = """
 📋 **Plantilla de Postulación:**
 
@@ -56,11 +56,55 @@ POSTULACION_TEMPLATE = """
 𝐇𝐨𝐫𝐚𝐬 𝐝𝐢𝐚𝐫𝐢𝐚𝐬 𝐪𝐮𝐞 𝐩𝐮𝐞𝐝𝐞𝐬 𝐣𝐮𝐠𝐚𝐫 𝐚𝐥 𝐝𝐢𝐚:
 𝐓𝐢𝐞𝐧𝐞𝐬 𝐛𝐥𝐢𝐧𝐝𝐚𝐝𝐨 𝐨 𝐦𝐨𝐭𝐨:
 """
-
-# ---------- Variables de control ----------
 asumidos = {}
 
-# ---------- Botones ----------
+# --------------------------------------------------------------------------------
+# --- NUEVO: SISTEMA DE VERIFICACIÓN ---
+# --------------------------------------------------------------------------------
+
+class VerificationView(View):
+    def __init__(self):
+        # timeout=None hace que el botón funcione para siempre.
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Verificarte", style=discord.ButtonStyle.secondary, custom_id="verify_button", emoji="🛡️")
+    async def verify_button_callback(self, interaction: discord.Interaction, button: Button):
+        # Busca el rol en el servidor usando el ID que configuramos arriba.
+        role = interaction.guild.get_role(VERIFIED_ROLE_ID)
+
+        if role is None:
+            # Mensaje de error si el rol no se encuentra (ID incorrecto).
+            await interaction.response.send_message("❌ Error: El rol de verificación no está configurado correctamente. Contacta a un administrador.", ephemeral=True)
+            return
+
+        # Comprueba si el usuario ya tiene el rol.
+        if role in interaction.user.roles:
+            await interaction.response.send_message("✅ Ya estás verificado.", ephemeral=True)
+        else:
+            # Si no lo tiene, se lo añade.
+            await interaction.user.add_roles(role)
+            await interaction.response.send_message("✅ ¡Has sido verificado correctamente!", ephemeral=True)
+
+# ---------- Comando para enviar el panel de verificación ----------
+@bot.command()
+@commands.has_permissions(administrator=True) # Solo los admins pueden usarlo
+async def verificacion(ctx):
+    embed = discord.Embed(
+        title="🛡️ VERIFICARTE",
+        description="Para acceder al servidor, necesitas verificarte haciendo clic en el botón de abajo.",
+        color=0x2f3136
+    )
+    embed.set_footer(text="© KRNL")
+
+    # Envía el mensaje con el embed y la vista (que contiene el botón).
+    await ctx.send(embed=embed, view=VerificationView())
+
+
+# --------------------------------------------------------------------------------
+# --- TU ANTIGUO CÓDIGO DE TICKETS (SIN CAMBIOS) ---
+# --------------------------------------------------------------------------------
+
+# ---------- Botones de Ticket ----------
 class TicketButtons(View):
     def __init__(self, tipo, autor):
         super().__init__(timeout=None)
@@ -81,7 +125,6 @@ class TicketButtons(View):
         view = View()
         async def confirmar_callback(i):
             if i.user.guild_permissions.administrator:
-                # Transcript
                 messages = []
                 async for msg in interaction.channel.history(limit=None, oldest_first=True):
                     messages.append(f"{msg.author}: {msg.content}")
@@ -95,7 +138,6 @@ class TicketButtons(View):
                     color=0xff0000
                 )
                 await log_channel.send(embed=embed_log, file=file)
-
                 await interaction.channel.delete()
             else:
                 await i.response.send_message("❌ No tienes permisos.", ephemeral=True)
@@ -103,15 +145,13 @@ class TicketButtons(View):
         confirm_button = Button(label="Confirmar", style=discord.ButtonStyle.danger)
         confirm_button.callback = confirmar_callback
         view.add_item(confirm_button)
-
         await interaction.response.send_message(embed=confirm, view=view, ephemeral=True)
-
+    # ... (El resto de tus botones de ticket siguen aquí, sin cambios)
     @discord.ui.button(label="Asumir", style=discord.ButtonStyle.secondary)
     async def asumir(self, interaction: discord.Interaction, button: Button):
         if interaction.channel.id in asumidos:
             await interaction.response.send_message("⚠️ Este ticket ya fue asumido.", ephemeral=True)
             return
-
         asumidos[interaction.channel.id] = interaction.user.id
         await interaction.channel.edit(name=f"{self.tipo}-{self.autor.name}")
         await interaction.response.send_message(f"👤 Ticket asumido por {interaction.user.mention}", ephemeral=False)
@@ -131,49 +171,48 @@ class TicketButtons(View):
         modal = RenameTicketModal(interaction.channel)
         await interaction.response.send_modal(modal)
 
-# ---------- Modales ----------
+# ---------- Modales de Ticket----------
 class AddMemberModal(Modal, title="Añadir miembro al Ticket"):
     user_id = TextInput(label="ID del usuario", style=discord.TextStyle.short)
-
     def __init__(self, channel):
         super().__init__()
         self.channel = channel
-
     async def on_submit(self, interaction: discord.Interaction):
-        member = await interaction.guild.fetch_member(int(self.user_id.value))
-        await self.channel.set_permissions(member, read_messages=True, send_messages=True)
-        await interaction.response.send_message(f"✅ {member.mention} añadido al ticket.", ephemeral=True)
+        try:
+            member_id = int(self.user_id.value)
+            member = await interaction.guild.fetch_member(member_id)
+            await self.channel.set_permissions(member, read_messages=True, send_messages=True)
+            await interaction.response.send_message(f"✅ {member.mention} añadido al ticket.", ephemeral=True)
+        except (ValueError, discord.NotFound):
+            await interaction.response.send_message("❌ ID de usuario no válido.", ephemeral=True)
 
 class RemoveMemberModal(Modal, title="Sacar miembro del Ticket"):
     user_id = TextInput(label="ID del usuario", style=discord.TextStyle.short)
-
     def __init__(self, channel):
         super().__init__()
         self.channel = channel
-
     async def on_submit(self, interaction: discord.Interaction):
-        member = await interaction.guild.fetch_member(int(self.user_id.value))
-        await self.channel.set_permissions(member, overwrite=None)
-        await interaction.response.send_message(f"❌ {member.mention} eliminado del ticket.", ephemeral=True)
+        try:
+            member_id = int(self.user_id.value)
+            member = await interaction.guild.fetch_member(member_id)
+            await self.channel.set_permissions(member, overwrite=None)
+            await interaction.response.send_message(f"❌ {member.mention} eliminado del ticket.", ephemeral=True)
+        except (ValueError, discord.NotFound):
+            await interaction.response.send_message("❌ ID de usuario no válido.", ephemeral=True)
 
 class RenameTicketModal(Modal, title="Renombrar Ticket"):
     new_name = TextInput(label="Nuevo nombre del canal", style=discord.TextStyle.short)
-
     def __init__(self, channel):
         super().__init__()
         self.channel = channel
-
     async def on_submit(self, interaction: discord.Interaction):
         await self.channel.edit(name=self.new_name.value)
         await interaction.response.send_message(f"✏️ Ticket renombrado a **{self.new_name.value}**", ephemeral=True)
 
-# ---------- !ticket ----------
+# ---------- Comando !ticket ----------
 @bot.command()
+@commands.has_permissions(administrator=True)
 async def ticket(ctx):
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.send("❌ Solo los administradores pueden usar este comando.")
-        return
-
     embed = discord.Embed(
         title="📩 Sistema de Tickets",
         description=(
@@ -185,8 +224,8 @@ async def ticket(ctx):
         color=0x2f3136
     )
     embed.set_footer(text="El mejor sistema de tickets putaamaaaas")
-    embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")  # Arriba a la derecha
-    embed.set_image(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")      # Abajo del texto
+    embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")
+    embed.set_image(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")
 
     options = [
         discord.SelectOption(label="Postulación", description="📝 Para postular a la mejor banda."),
@@ -205,21 +244,15 @@ async def ticket(ctx):
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             inter.user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
-
         channel = await guild.create_text_channel(f"ticket-{tipo}-{inter.user.name}", category=category, overwrites=overwrites)
-
         embed_ticket = discord.Embed(
             title=f"📂 Ticket de {tipo.capitalize()}",
             description="Por favor, explica tu caso abajo." if tipo != "postulación" else POSTULACION_TEMPLATE,
             color=0x2f3136
         )
         embed_ticket.set_footer(text=f"Solicitado por: {inter.user}")
-        embed_ticket.set_thumbnail(url="")  # Arriba derecha
-        embed_ticket.set_image(url="")      # Abajo
-
         view = TicketButtons(tipo, inter.user)
         await channel.send(embed=embed_ticket, view=view)
-
         await inter.response.send_message(f"✅ Ticket de **{tipo.capitalize()}** creado: {channel.mention}", ephemeral=True)
 
     select.callback = select_callback
@@ -227,26 +260,23 @@ async def ticket(ctx):
     view.add_item(select)
     await ctx.send(embed=embed, view=view)
 
-# ---------- On Ready ----------
+# ---------- Evento On Ready ----------
 @bot.event
 async def on_ready():
+    # Esto registra la vista de verificación para que el botón siga funcionando después de reiniciar el bot.
+    bot.add_view(VerificationView())
     print(f"✅ Bot conectado como {bot.user}")
 
 # --- ARRANQUE DEL BOT Y EL SERVIDOR ---
 if __name__ == "__main__":
-    # 1. Inicia el servidor web
     keep_alive()
-    
-    # 2. Obtiene el token de forma segura desde las variables de entorno
     try:
-        # LA LÍNEA CORRECTA: Busca la variable llamada "DISCORD_TOKEN"
         token = os.environ.get("DISCORD_TOKEN")
-        
         if token is None:
             print("❌ ERROR: El token no está configurado.")
             print("Asegúrate de crear la variable 'DISCORD_TOKEN' en tu hosting.")
         else:
-            # 3. Inicia el bot de Discord
             bot.run(token)
     except discord.errors.LoginFailure:
         print("❌ ERROR: El token proporcionado es inválido.")
+
