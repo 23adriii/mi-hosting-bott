@@ -67,7 +67,7 @@ class VerificationView(View):
         # timeout=None hace que el botón funcione para siempre.
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Verificarte", style=discord.ButtonStyle.secondary, custom_id="verify_button", emoji=":white_check_mark: ")
+    @discord.ui.button(label="Verificarte", style=discord.ButtonStyle.secondary, custom_id="verify_button", emoji="✅")
     async def verify_button_callback(self, interaction: discord.Interaction, button: Button):
         # Busca el rol en el servidor usando el ID que configuramos arriba.
         role = interaction.guild.get_role(VERIFIED_ROLE_ID)
@@ -90,7 +90,7 @@ class VerificationView(View):
 @commands.has_permissions(administrator=True) # Solo los admins pueden usarlo
 async def verificacion(ctx):
     embed = discord.Embed(
-        title=":white_check_mark: VERIFICARTE",
+        title="✅ VERIFICARTE",
         description="Para acceder al servidor, necesitas verificarte haciendo clic en el botón de abajo.",
         color=0x2f3136
     )
@@ -279,4 +279,5 @@ if __name__ == "__main__":
             bot.run(token)
     except discord.errors.LoginFailure:
         print("❌ ERROR: El token proporcionado es inválido.")
+
 
