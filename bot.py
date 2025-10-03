@@ -1,7 +1,7 @@
 # --- IMPORTACIONES NECESARIAS ---
 import discord
 from discord.ext import commands
-from discord.ui import View, Button, Modal, TextInput
+from discord.ui import View, Button, Modal, TextInput, Select # Añadido Select para tipado
 import io
 import os  # Para leer el token de forma segura
 from flask import Flask  # Para el servidor web
@@ -59,52 +59,111 @@ POSTULACION_TEMPLATE = """
 asumidos = {}
 
 # --------------------------------------------------------------------------------
-# --- NUEVO: SISTEMA DE VERIFICACIÓN ---
+# --- SISTEMAS PERSISTENTES (VISTAS) ---
 # --------------------------------------------------------------------------------
 
 class VerificationView(View):
     def __init__(self):
-        # timeout=None hace que el botón funcione para siempre.
         super().__init__(timeout=None)
 
     @discord.ui.button(label="Verificarte", style=discord.ButtonStyle.secondary, custom_id="verify_button", emoji="✅")
     async def verify_button_callback(self, interaction: discord.Interaction, button: Button):
-        # Busca el rol en el servidor usando el ID que configuramos arriba.
         role = interaction.guild.get_role(VERIFIED_ROLE_ID)
-
         if role is None:
-            # Mensaje de error si el rol no se encuentra (ID incorrecto).
-            await interaction.response.send_message("❌ Error: El rol de verificación no está configurado correctamente. Contacta a un administrador.", ephemeral=True)
+            await interaction.response.send_message("❌ Error: El rol de verificación no está configurado. Contacta a un administrador.", ephemeral=True)
             return
-
-        # Comprueba si el usuario ya tiene el rol.
         if role in interaction.user.roles:
             await interaction.response.send_message("✅ Ya estás verificado.", ephemeral=True)
         else:
-            # Si no lo tiene, se lo añade.
             await interaction.user.add_roles(role)
             await interaction.response.send_message("✅ ¡Has sido verificado correctamente!", ephemeral=True)
 
-# ---------- Comando para enviar el panel de verificación ----------
+# --- SOLUCIÓN: Vista persistente para la creación de tickets ---
+class TicketCreationView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.select(
+        placeholder="Selecciona una opción para abrir un ticket",
+        custom_id="ticket_creation_menu",
+        options=[
+            discord.SelectOption(label="Postulación", description="📝 Para postular a la mejor banda.", emoji="📝"),
+            discord.SelectOption(label="Jefatura", description="🧠 Para hablar con una jefatura.", emoji="🧠"),
+            discord.SelectOption(label="Seguridad", description="🛡️ Para temas de alianzas/seguridad.", emoji="🛡️"),
+            discord.SelectOption(label="Soporte", description="🛠️ Para hablar con soporte.", emoji="🛠️")
+        ]
+    )
+    async def select_callback(self, interaction: discord.Interaction, select: Select):
+        tipo = select.values[0].lower()
+        guild = interaction.guild
+        category = guild.get_channel(CATEGORIES[tipo])
+
+        # Comprobación por si la categoría ha sido borrada
+        if category is None:
+            await interaction.response.send_message("❌ Error: La categoría para este ticket no existe. Avisa a un administrador.", ephemeral=True)
+            return
+
+        # Evita que se creen tickets duplicados rápidamente
+        for channel in category.text_channels:
+            if channel.name == f"ticket-{tipo}-{interaction.user.name.lower()}":
+                 await interaction.response.send_message(f"❌ Ya tienes un ticket de **{tipo}** abierto: {channel.mention}", ephemeral=True)
+                 return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+        channel = await guild.create_text_channel(f"ticket-{tipo}-{interaction.user.name}", category=category, overwrites=overwrites)
+        embed_ticket = discord.Embed(
+            title=f"📂 Ticket de {tipo.capitalize()}",
+            description="Por favor, explica tu caso abajo." if tipo != "postulación" else POSTULACION_TEMPLATE,
+            color=0x2f3136
+        )
+        embed_ticket.set_footer(text=f"Solicitado por: {interaction.user}")
+        view = TicketButtons(tipo, interaction.user)
+        await channel.send(embed=embed_ticket, view=view)
+        await interaction.response.send_message(f"✅ Ticket de **{tipo.capitalize()}** creado: {channel.mention}", ephemeral=True)
+
+
+# --------------------------------------------------------------------------------
+# --- COMANDOS ---
+# --------------------------------------------------------------------------------
+
 @bot.command()
-@commands.has_permissions(administrator=True) # Solo los admins pueden usarlo
+@commands.has_permissions(administrator=True)
 async def verificacion(ctx):
     embed = discord.Embed(
-        title="✅ VERIFICARTE",
+        title="VERIFICARTE",
         description="Para acceder al servidor, necesitas verificarte haciendo clic en el botón de abajo.",
         color=0x2f3136
     )
     embed.set_footer(text="© JB INFO")
-
-    # Envía el mensaje con el embed y la vista (que contiene el botón).
     await ctx.send(embed=embed, view=VerificationView())
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def ticket(ctx):
+    embed = discord.Embed(
+        title="📩 Sistema de Tickets",
+        description=(
+            "📌 Para postular a la mejor banda de KRNL PVP, selecciona 📝 **Postulación**.\n"
+            "📌 Para hablar con una jefatura selecciona 🧠 **Jefatura**.\n"
+            "📌 Para abrir ticket de cualquier tipo de alianza/seguridad selecciona 🛡️ **Seguridad**.\n"
+            "📌 Para hablar con soporte selecciona 🛠️ **Soporte**."
+        ),
+        color=0x2f3136
+    )
+    embed.set_footer(text="El mejor sistema de tickets putaamaaaas")
+    embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")
+    embed.set_image(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")
+    
+    # Ahora usamos la vista persistente
+    await ctx.send(embed=embed, view=TicketCreationView())
 
 # --------------------------------------------------------------------------------
-# --- TU ANTIGUO CÓDIGO DE TICKETS (SIN CAMBIOS) ---
+# --- CÓDIGO DE GESTIÓN DE TICKETS (SIN CAMBIOS) ---
 # --------------------------------------------------------------------------------
 
-# ---------- Botones de Ticket ----------
 class TicketButtons(View):
     def __init__(self, tipo, autor):
         super().__init__(timeout=None)
@@ -146,7 +205,7 @@ class TicketButtons(View):
         confirm_button.callback = confirmar_callback
         view.add_item(confirm_button)
         await interaction.response.send_message(embed=confirm, view=view, ephemeral=True)
-    # ... (El resto de tus botones de ticket siguen aquí, sin cambios)
+    
     @discord.ui.button(label="Asumir", style=discord.ButtonStyle.secondary)
     async def asumir(self, interaction: discord.Interaction, button: Button):
         if interaction.channel.id in asumidos:
@@ -171,7 +230,6 @@ class TicketButtons(View):
         modal = RenameTicketModal(interaction.channel)
         await interaction.response.send_modal(modal)
 
-# ---------- Modales de Ticket----------
 class AddMemberModal(Modal, title="Añadir miembro al Ticket"):
     user_id = TextInput(label="ID del usuario", style=discord.TextStyle.short)
     def __init__(self, channel):
@@ -209,65 +267,17 @@ class RenameTicketModal(Modal, title="Renombrar Ticket"):
         await self.channel.edit(name=self.new_name.value)
         await interaction.response.send_message(f"✏️ Ticket renombrado a **{self.new_name.value}**", ephemeral=True)
 
-# ---------- Comando !ticket ----------
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def ticket(ctx):
-    embed = discord.Embed(
-        title="📩 Sistema de Tickets",
-        description=(
-            "📌 Para postular a la mejor banda de KRNL PVP, selecciona 📝 **Postulación**.\n"
-            "📌 Para hablar con una jefatura selecciona 🧠 **Jefatura**.\n"
-            "📌 Para abrir ticket de cualquier tipo de alianza/seguridad selecciona 🛡️ **Seguridad**.\n"
-            "📌 Para hablar con soporte selecciona 🛠️ **Soporte**."
-        ),
-        color=0x2f3136
-    )
-    embed.set_footer(text="El mejor sistema de tickets putaamaaaas")
-    embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")
-    embed.set_image(url="https://cdn.discordapp.com/attachments/1423271362750976091/1423650841503731772/37f183bd-60d8-44dc-8408-b686aaad4791.png?ex=68e115aa&is=68dfc42a&hm=df0387036c717bbb540831913a67e6cddf9ff6489525ceab3b3bf54fd5aa50f6&")
+# --------------------------------------------------------------------------------
+# --- EVENTOS Y ARRANQUE ---
+# --------------------------------------------------------------------------------
 
-    options = [
-        discord.SelectOption(label="Postulación", description="📝 Para postular a la mejor banda."),
-        discord.SelectOption(label="Jefatura", description="🧠 Para hablar con una jefatura."),
-        discord.SelectOption(label="Seguridad", description="🛡️ Para temas de alianzas/seguridad."),
-        discord.SelectOption(label="Soporte", description="🛠️ Para hablar con soporte.")
-    ]
-    select = discord.ui.Select(placeholder="Selecciona una opción", options=options)
-
-    async def select_callback(inter):
-        tipo = inter.data['values'][0].lower()
-        guild = inter.guild
-        category = guild.get_channel(CATEGORIES[tipo])
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            inter.user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
-        channel = await guild.create_text_channel(f"ticket-{tipo}-{inter.user.name}", category=category, overwrites=overwrites)
-        embed_ticket = discord.Embed(
-            title=f"📂 Ticket de {tipo.capitalize()}",
-            description="Por favor, explica tu caso abajo." if tipo != "postulación" else POSTULACION_TEMPLATE,
-            color=0x2f3136
-        )
-        embed_ticket.set_footer(text=f"Solicitado por: {inter.user}")
-        view = TicketButtons(tipo, inter.user)
-        await channel.send(embed=embed_ticket, view=view)
-        await inter.response.send_message(f"✅ Ticket de **{tipo.capitalize()}** creado: {channel.mention}", ephemeral=True)
-
-    select.callback = select_callback
-    view = View()
-    view.add_item(select)
-    await ctx.send(embed=embed, view=view)
-
-# ---------- Evento On Ready ----------
 @bot.event
 async def on_ready():
-    # Esto registra la vista de verificación para que el botón siga funcionando después de reiniciar el bot.
+    # SOLUCIÓN: Registramos ambas vistas para que sean persistentes.
     bot.add_view(VerificationView())
+    bot.add_view(TicketCreationView()) 
     print(f"✅ Bot conectado como {bot.user}")
 
-# --- ARRANQUE DEL BOT Y EL SERVIDOR ---
 if __name__ == "__main__":
     keep_alive()
     try:
@@ -279,5 +289,4 @@ if __name__ == "__main__":
             bot.run(token)
     except discord.errors.LoginFailure:
         print("❌ ERROR: El token proporcionado es inválido.")
-
 
